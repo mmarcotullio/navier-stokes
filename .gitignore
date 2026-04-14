@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Data directories (large files)
+data/
+cfd_training_data/
+inverse/fno_training_data/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model checkpoints (can be large)
+*.pt
+*.pth
+*.ckpt
+*.h5
+
+# IDE
+.vscode/
+.idea/
+pyrightconfig.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

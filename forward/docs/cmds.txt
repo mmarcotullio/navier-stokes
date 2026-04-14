@@ -1,0 +1,153 @@
+================================================================================
+  FNO STEADY-STATE PIPELINE — FULL COMMAND REFERENCE
+  Run all commands from the project root:
+    cd /home/matthew/Desktop/saved/navier-stokes
+================================================================================
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 0 — PREREQUISITES
+────────────────────────────────────────────────────────────────────────────────
+
+# Verify OpenFOAM is available
+simpleFoam -help
+
+# Verify Python environment
+pip install -r requirements.txt
+
+# install bc
+sudo apt update && sudo apt install -y bc
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 1 — GENERATE THE FNO SAMPLING GRID
+  Creates cfd_training_data/cyl_grid.xyz (the Cartesian point cloud that
+  OpenFOAM samples onto at the end of each simulation).
+────────────────────────────────────────────────────────────────────────────────
+
+python3 scripts/generate_cylindrical_3D_grid.py
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 2 — BUILD THE BASE MESH
+  Run simpleFoam once inside meshBase to produce the polyMesh that every
+  training case will copy.  Do this ONCE before launching batch simulations.
+────────────────────────────────────────────────────────────────────────────────
+
+cd ../cfd_training_data/meshBase
+simpleFoam
+cd ../..
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 3 — RUN 1000 CFD TRAINING CASES (5 PARALLEL TMUX SESSIONS)
+  Open 5 tmux panes (or 5 terminal tabs) and run one command per pane.
+  Each pane handles 200 cases independently — they write to separate
+  case_XXXX/ directories and never interfere with each other.
+  Wait for ALL 5 to finish before moving to Step 4.
+────────────────────────────────────────────────────────────────────────────────
+
+# --- tmux session setup (optional convenience) ---
+tmux new-session -s cfd               # creates session with pane 1 open
+# Then split into 5 panes:
+#   Ctrl+b %   (vertical split)
+#   Ctrl+b "   (horizontal split)
+# Navigate panes with Ctrl+b arrow keys.
+
+# NOTE: set PROJECT_ROOT to wherever you cloned the repo.
+#   Local:  PROJECT_ROOT=/home/matthew/Desktop/saved/navier-stokes
+#   Server: PROJECT_ROOT=/home/ubuntu/fno/fourier_net_steady_state
+# The script detects the project root via pwd when piped through sed,
+# so the leading  cd $PROJECT_ROOT  is required.
+
+# PANE 1  (cases 1–200)
+cd /home/ubuntu/fno/fourier_net_steady_state && sed 's/{1..1000}/{1..200}/' scripts/run_batch_openfoam_parallel.sh | bash
+
+# PANE 2  (cases 201–400)
+cd /home/ubuntu/fno/fourier_net_steady_state && sed 's/{1..1000}/{201..400}/' scripts/run_batch_openfoam_parallel.sh | bash
+
+# PANE 3  (cases 401–600)
+cd /home/ubuntu/fno/fourier_net_steady_state && sed 's/{1..1000}/{401..600}/' scripts/run_batch_openfoam_parallel.sh | bash
+
+# PANE 4  (cases 601–800)
+cd /home/ubuntu/fno/fourier_net_steady_state && sed 's/{1..1000}/{601..800}/' scripts/run_batch_openfoam_parallel.sh | bash
+
+# PANE 5  (cases 801–1000)
+cd /home/ubuntu/fno/fourier_net_steady_state && sed 's/{1..1000}/{801..1000}/' scripts/run_batch_openfoam_parallel.sh | bash
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 4 — EXPORT CFD RESULTS TO FNO GRID FORMAT
+  Reads postProcessing/ output from every case_XXXX/, takes the last
+  (most converged) pseudo-time directory, and saves:
+    cfd_training_data/fno_grid/case_XXXX/coords.npy   (N, 3)
+    cfd_training_data/fno_grid/case_XXXX/u.npy        (N, 3)
+    cfd_training_data/fno_grid/case_XXXX/p.npy        (N,)
+    cfd_training_data/fno_grid/case_XXXX/sampled_mask.npy
+    cfd_training_data/fno_grid/metadata.csv
+────────────────────────────────────────────────────────────────────────────────
+
+python3 scripts/export_fno_grid.py
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 5 — TRAIN THE FNO MODEL
+────────────────────────────────────────────────────────────────────────────────
+
+python3 train.py
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 6 — EVALUATE AND VISUALISE
+  Edit RE and U_IN at the top of scripts/evaluate.py to match any row
+  in cfd_training_data/fno_grid/metadata.csv, then run:
+────────────────────────────────────────────────────────────────────────────────
+
+# (optional) inspect available cases to pick RE / U_IN values
+head -20 cfd_training_data/fno_grid/metadata.csv
+
+# edit the two constants at the top of the script
+#   RE   = <value from metadata.csv>
+#   U_IN = <value from metadata.csv>
+nano scripts/evaluate.py
+
+# run evaluation — outputs written to results/
+python3 scripts/evaluate.py
+
+# outputs:
+#   results/comparison_2d.png    2-D heatmap (actual / predicted / |error|)
+#   results/actual_3d.vtk        open in ParaView
+#   results/predicted_3d.vtk     open in ParaView
+
+
+────────────────────────────────────────────────────────────────────────────────
+OPTIONAL — CONVERT ANY SINGLE CASE TO VTK FOR INSPECTION
+  Visualise a raw CFD result (before training) in ParaView.
+────────────────────────────────────────────────────────────────────────────────
+
+python3 scripts/numpy_to_vtk_timeseries.py \
+    --case_dir cfd_training_data/fno_grid/case_0001 \
+    --out_dir  results/vtk_case_0001 \
+    --mask_pipe
+
+
+================================================================================
+  QUICK REFERENCE — FILE ROLES
+================================================================================
+
+  scripts/generate_cylindrical_3D_grid.py   builds cyl_grid.xyz
+  scripts/run_batch_openfoam_parallel.sh     runs simpleFoam for all cases
+  scripts/export_fno_grid.py                 converts postProcessing → .npy
+  train.py                                   trains the FNO model
+  scripts/evaluate.py                        inference + error + visualisation
+  scripts/numpy_to_vtk_timeseries.py         raw case → ParaView VTK
+
+  cfd_training_data/template_case/           OpenFOAM case template (simpleFoam)
+  cfd_training_data/meshBase/                base mesh (run once)
+  cfd_training_data/cases/case_XXXX/        raw simpleFoam output per case
+  cfd_training_data/fno_grid/case_XXXX/     processed .npy data per case
+  models_fno/fno3d_best.pt                   saved model checkpoint
+  results/                                   evaluation outputs
+
+================================================================================
