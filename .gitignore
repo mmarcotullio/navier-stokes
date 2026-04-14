@@ -18,6 +18,10 @@ data/
 cfd_training_data/
 inverse/fno_training_data/
 
+# Excluded directories
+navier-stokes_vis/
+forward/docs/
+
 # Jupyter
 .ipynb_checkpoints/
 
